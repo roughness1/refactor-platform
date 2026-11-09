@@ -64,6 +64,8 @@ jobs:
     needs: build
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - name: docker compose up
@@ -106,3 +108,14 @@ jobs:
           path: smoke/
       - if: always()
         run: docker compose down -v
+      - name: publish results to smoke-results branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          cp -r smoke "$RUNNER_TEMP/smoke"
+          git checkout --orphan smoke-results
+          git rm -rf -q .
+          cp -r "$RUNNER_TEMP/smoke" smoke
+          git add smoke
+          git commit -q -m "smoke: результаты запуска №${GITHUB_RUN_NUMBER}"
+          git push -f origin smoke-results
