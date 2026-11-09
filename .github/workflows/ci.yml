@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: pip install flake8
+      - run: flake8 app tests scripts
+
+  test:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - run: pytest --cov=app --cov-report=term --cov-report=xml --cov-fail-under=80
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.xml
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: github.event_name == 'push'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.event_name == 'push' }}
+          tags: ghcr.io/${{ env.OWNER }}/refactor-platform:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  smoke:
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker compose up
+        run: docker compose up --build -d
+      - name: wait for /health
+        run: |
+          for i in $(seq 1 40); do
+            curl -sf http://localhost:8000/health && exit 0
+            sleep 3
+          done
+          docker compose logs app
+          exit 1
+      - name: load
+        run: python3 scripts/smoke_load.py http://localhost:8000 150
+      - name: collect results
+        run: |
+          mkdir -p smoke
+          docker compose ps > smoke/compose_ps.txt
+          curl -s http://localhost:8000/health > smoke/health.json
+          curl -s "http://localhost:9090/api/v1/targets" > smoke/targets.json
+          sleep 20
+          google-chrome --headless=new --no-sandbox --disable-gpu --hide-scrollbars --window-size=1600,900 \
+            --virtual-time-budget=20000 --screenshot=smoke/grafana.png \
+            "http://localhost:3000/d/refactor-platform/?orgId=1&kiosk&from=now-5m&to=now"
+          google-chrome --headless=new --no-sandbox --disable-gpu --hide-scrollbars --window-size=1400,1000 \
+            --virtual-time-budget=10000 --screenshot=smoke/swagger.png "http://localhost:8000/docs"
+          {
+            echo "### docker compose ps"
+            echo '```'
+            cat smoke/compose_ps.txt
+            echo '```'
+            echo "### GET /health"
+            echo '```'
+            cat smoke/health.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smoke
+          path: smoke/
+      - if: always()
+        run: docker compose down -v
