@@ -1,0 +1,5 @@
+NAME                             IMAGE                     COMMAND                  SERVICE      CREATED         STATUS                   PORTS
+refactor-platform-app-1          refactor-platform-app     "uvicorn app.main:ap…"   app          2 minutes ago   Up 2 minutes (healthy)   0.0.0.0:8000->8000/tcp, [::]:8000->8000/tcp
+refactor-platform-db-1           postgres:16-alpine        "docker-entrypoint.s…"   db           2 minutes ago   Up 2 minutes (healthy)   5432/tcp
+refactor-platform-grafana-1      grafana/grafana:11.2.0    "/run.sh"                grafana      2 minutes ago   Up 2 minutes             0.0.0.0:3000->3000/tcp, [::]:3000->3000/tcp
+refactor-platform-prometheus-1   prom/prometheus:v2.53.2   "/bin/prometheus --c…"   prometheus   2 minutes ago   Up 2 minutes             0.0.0.0:9090->9090/tcp, [::]:9090->9090/tcp
